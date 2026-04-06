@@ -18,8 +18,13 @@ db = Chroma(
 
 # Search for relevant documents
 query = "How much did Microsoft pay to acquire GitHub?"
-
-retriever = db.as_retriever(search_kwargs={"k": 5})
+retriever = db.as_retriever(
+    search_type="similarity_score_threshold",
+    search_kwargs={
+         "k": 3,
+         "score_threshold": 0.5 
+        }
+)
 
 # retriever = db.as_retriever(
 #     search_type="similarity_score_threshold",
@@ -34,8 +39,9 @@ relevant_docs = retriever.invoke(query)
 context = "\n".join([doc.page_content for doc in relevant_docs])
 
 prompt_template = f"""
-    you have to answer the query based on the context only
-    and do not hallucinate if you do not know the answer, say , the query cannot be resolved in case of no information or context about the query asked.
+    you have to answer the query ONLY based on context,
+    if answer exists explicitly, return it directly and do not infer beyond context.
+    If you do not know the answer, say , the query cannot be resolved in case of no information or context about the query asked.
     context:
     {context}
     user_question:
@@ -49,8 +55,8 @@ response = ai_model.invoke(query)
 # print(f"User Query: {query}")
 # # Display results
 # print("--- Context ---")
-# for i, doc in enumerate(relevant_docs, 1):
-#     print(f"Document {i}:\n{doc.page_content}\n")
+for i, doc in enumerate(relevant_docs, 1):
+    print(f"Document {i}:\n{doc.page_content}\n")
 
 print(f"""the response is : {response}""")
 # Synthetic Questions: 

@@ -1,10 +1,16 @@
 import os
+import json,gc,time
+import shutil
 from langchain_community.document_loaders import TextLoader, DirectoryLoader
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
 
+docs_path="Docs"
+persistent_directory = "db/chroma_db"
+config_path = "Config/config_path.json"
+db_config_path = "db/db_config.json"
 
 load_dotenv()
 print(os.getenv("OPENAI_API_KEY"))
@@ -27,7 +33,7 @@ def load_documents(docs_path="Docs"):
     documents = loader.load()
     
     if len(documents) == 0:
-        raise FileNotFoundError(f"No .txt files found in {docs_path}. Please add your company documents.")
+        raise FileNotFoundError(f"No .txt files found in {docs_path}. Please add your notes.")
     
    
     for i, doc in enumerate(documents[:2]):  # Show first 2 documents
@@ -39,7 +45,7 @@ def load_documents(docs_path="Docs"):
 
     return documents
 
-def split_docs(documents, chunk_size=500, chunk_overlap=40):
+def split_docs(documents, chunk_size, chunk_overlap):
     print(f"Spliting the documnets into chunks of {chunk_size}")
 
     split = CharacterTextSplitter(
@@ -68,14 +74,58 @@ def vector_store_config(chunks, persistent_directory = "db/chroma_db"):
         collection_metadata={"hnsw:space":"cosine"}    
         )
     return vectordb    
+
+#utility functions
+
+def load_config():
+     with open(config_path,"r") as file:
+        return json.load(file)
+
+def config_changed():
+    if not os.path.exists(db_config_path):
+        return True
+    with open(db_config_path,"r") as file:
+        old_config = json.load(file)
+
+    new_config = load_config()
+    return new_config!=old_config
+
+def save_config():
+    new_config=load_config()
+    with open(db_config_path,"w") as file:
+        json.dump(new_config,file,indent =2)
+
+
+def delete_db():
+     #deletes the existing db from memory, prevents access denial errors
+    gc.collect()
+    global vectordb
+    vectordb = None
+    if os.path.exists(persistent_directory):
+        shutil.rmtree(persistent_directory)
+        print("Old DB deleted")                
+ 
+
 def main():
     print("Imports done!")
-    docs_path ="Docs" 
-    persistent_directory = "db/chroma_db"
-    # Check if vector store already exists
-    if os.path.exists(persistent_directory):
-        print("✅ Vector store already exists. No need to re-process documents.")
-        
+    #paths for documents, persistence and configurations versions (tracking version, chunk sizes and overlaps)
+    
+    if config_changed():
+        delete_db()
+        #load the docs
+        documents = load_documents(docs_path)
+        config = load_config()
+        new_chunk_size = int(config["chunk_size"])
+        new_chunk_overlap = int(config["chunk_overlap"])
+
+        #splitting the documnets into chunks
+        chunks = split_docs(documents,new_chunk_size,new_chunk_overlap)
+        print(len(chunks))
+        #making the vector store of the embeddings of the tokens and storing the in chroma db
+        vectordb = vector_store_config(chunks,persistent_directory)
+        save_config()
+
+    else:
         embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         vectordb = Chroma(
             persist_directory=persistent_directory,
@@ -85,16 +135,6 @@ def main():
         print(f"Loaded existing vector store with {vectordb._collection.count()} documents")
         return vectordb
     
-    print("Persistent directory does not exist. Initializing vector store...\n")
-    #load the docs
-    documents = load_documents(docs_path)
-    print(len(documents))
-    #splitting the documnets into chunks
-    chunks = split_docs(documents)
-    print(len(chunks))
-    #making the vector store of the embeddings of the tokens and storing the in chroma db
-    vectordb = vector_store_config(chunks,persistent_directory)
-
  
 
 if __name__=="__main__":
